@@ -16,23 +16,23 @@ import javax.swing.SwingUtilities;
 import javax.swing.border.EmptyBorder;
 
 /**
- * Servicio encargado de verificar si existen nuevas versiones de la aplicación
- * en GitHub Releases y gestionar su descarga y reemplazo automático.
+ * Servicio encargado de comprobar versiones en GitHub Releases
+ * y gestionar la auto-actualización y reemplazo del archivo .jar.
  *
- * @author Marco Vences
+ * @author DarkMoon9
  * @version 1.1.0
  */
 public class UpdateService {
 
-    // Configuración con los datos exactos de tu cuenta y repositorio en GitHub
+    // Configuración oficial de tu repositorio en GitHub
     private static final String GITHUB_USUARIO = "DarkMoon9";
     private static final String GITHUB_REPOSITORIO = "gestor-universal-android";
 
-    // Versión instalada actualmente en la máquina local
+    // Versión grabada en el binario local
     public static final String VERSION_ACTUAL = "1.0.0";
 
     /**
-     * Consulta la API de GitHub en segundo plano para verificar si existe una nueva versión.
+     * Consulta la API de GitHub en segundo plano.
      */
     public static void comprobarActualizacionesManual() {
         new Thread(() -> {
@@ -64,7 +64,6 @@ public class UpdateService {
                     String urlDescargaJar = extraerUrlDescargaJar(json);
                     String nombreNuevoJar = extraerNombreArchivoRemoto(urlDescargaJar);
 
-                    // Devuelve la respuesta al hilo de interfaz gráfica de Swing
                     SwingUtilities.invokeLater(() -> procesarResultado(ultimaVersion, urlDescargaJar, nombreNuevoJar));
 
                 } else if (codigoRespuesta == 404) {
@@ -88,12 +87,6 @@ public class UpdateService {
         }).start();
     }
 
-    /**
-     * Extrae el valor de la etiqueta de versión ("tag_name") limpiando la letra 'v'.
-     *
-     * @param json Cadena JSON devuelta por GitHub.
-     * @return Versión numérica limpia (ejemplo: "1.1.0").
-     */
     private static String extraerTagVersion(String json) {
         String clave = "\"tag_name\":\"";
         int inicio = json.indexOf(clave);
@@ -107,12 +100,6 @@ public class UpdateService {
         return VERSION_ACTUAL;
     }
 
-    /**
-     * Localiza en el JSON la URL de descarga directa que termine en extensión .jar.
-     *
-     * @param json Cadena JSON devuelta por GitHub.
-     * @return Enlace directo al archivo binario ejecutable.
-     */
     private static String extraerUrlDescargaJar(String json) {
         String clave = "\"browser_download_url\":\"";
         int index = 0;
@@ -129,12 +116,6 @@ public class UpdateService {
         return null;
     }
 
-    /**
-     * Obtiene el nombre real del archivo a partir de la URL de descarga.
-     *
-     * @param urlDescarga Dirección web del archivo adjunto.
-     * @return Nombre del archivo (ejemplo: "GestorUniversalAndroid.jar").
-     */
     private static String extraerNombreArchivoRemoto(String urlDescarga) {
         if (urlDescarga == null || urlDescarga.isEmpty()) {
             return "GestorUniversalAndroid.jar";
@@ -146,9 +127,6 @@ public class UpdateService {
         return "GestorUniversalAndroid.jar";
     }
 
-    /**
-     * Notifica al usuario y pregunta si desea proceder con la actualización automática.
-     */
     private static void procesarResultado(String ultimaVersion, String urlDescargaJar, String nombreNuevoJar) {
         if (!VERSION_ACTUAL.equals(ultimaVersion)) {
             int opcion = JOptionPane.showConfirmDialog(null,
@@ -178,142 +156,139 @@ public class UpdateService {
         }
     }
 
-    /**
-     * Descarga el nuevo binario mostrando una barra de progreso y ejecuta el script de reemplazo.
-     */
     private static void descargarYReemplazar(String urlDescarga, String nombreNuevoJar) {
-        JDialog dialogo = new JDialog();
-        dialogo.setTitle("Descargando Actualización...");
-        dialogo.setSize(380, 130);
-        dialogo.setLocationRelativeTo(null);
-        dialogo.setLayout(new BorderLayout(10, 10));
-        dialogo.setDefaultCloseOperation(JDialog.DO_NOTHING_ON_CLOSE);
-
-        JLabel lblEstado = new JLabel("Conectando con GitHub...");
-        lblEstado.setBorder(new EmptyBorder(10, 15, 0, 15));
-        JProgressBar barra = new JProgressBar(0, 100);
-        barra.setStringPainted(true);
-        barra.setBorder(new EmptyBorder(0, 15, 10, 15));
-
-        dialogo.add(lblEstado, BorderLayout.NORTH);
-        dialogo.add(barra, BorderLayout.CENTER);
-
-        new Thread(() -> {
-            try {
-                URL url = new URL(urlDescarga);
-                HttpURLConnection conexion = (HttpURLConnection) url.openConnection();
-                conexion.setRequestProperty("User-Agent", "Mozilla/5.0");
-
-                // Seguir redirecciones HTTP habituales en descargas de GitHub
-                int estado = conexion.getResponseCode();
-                if (estado == HttpURLConnection.HTTP_MOVED_TEMP || estado == HttpURLConnection.HTTP_MOVED_PERM
-                        || estado == 307 || estado == 308) {
-                    String redireccion = conexion.getHeaderField("Location");
-                    conexion = (HttpURLConnection) new URL(redireccion).openConnection();
-                }
-
-                int tamanoTotal = conexion.getContentLength();
-                File archivoTemporal = new File("descarga_actualizacion.tmp");
-
-                try (InputStream entrada = conexion.getInputStream();
-                     FileOutputStream salida = new FileOutputStream(archivoTemporal)) {
-
-                    byte[] bufer = new byte[4096];
-                    int leidos;
-                    long acum = 0;
-
-                    while ((leidos = entrada.read(bufer)) != -1) {
-                        salida.write(bufer, 0, leidos);
-                        acum += leidos;
-
-                        if (tamanoTotal > 0) {
-                            int porcentaje = (int) ((acum * 100) / tamanoTotal);
-                            SwingUtilities.invokeLater(() -> {
-                                barra.setValue(porcentaje);
-                                lblEstado.setText("Descargando: " + porcentaje + "% completado");
-                            });
-                        }
-                    }
-                }
-
-                SwingUtilities.invokeLater(() -> {
-                    dialogo.dispose();
-                    JOptionPane.showMessageDialog(null,
-                            "Descarga completada con éxito.\nLa aplicación se cerrará para iniciar la nueva versión.",
-                            "Actualización Lista",
-                            JOptionPane.INFORMATION_MESSAGE);
-
-                    ejecutarScriptActualizacion(archivoTemporal, nombreNuevoJar);
-                });
-
-            } catch (Exception ex) {
-                SwingUtilities.invokeLater(() -> {
-                    dialogo.dispose();
-                    JOptionPane.showMessageDialog(null,
-                            "Error durante la descarga de la actualización:\n" + ex.getMessage(),
-                            "Error de Descarga",
-                            JOptionPane.ERROR_MESSAGE);
-                });
-            }
-        }).start();
-
-        dialogo.setVisible(true);
-    }
-
-    /**
-     * Construye y lanza un script .bat temporal que se ejecuta de forma completamente
-     * invisible utilizando un micro-script VBScript, evitando que aparezcan ventanas negras de CMD.
-     *
-     * @param archivoTemporal Archivo .tmp descargado desde GitHub.
-     * @param nombreNuevoJar  Nombre final del archivo ejecutable de la nueva versión.
-     */
-    private static void ejecutarScriptActualizacion(File archivoTemporal, String nombreNuevoJar) {
         try {
-            // Localiza el archivo ejecutable .jar actual
+            // Verificar si se está ejecutando desde un .jar empaquetado real
             File jarEnEjecucion = new File(UpdateService.class.getProtectionDomain()
                     .getCodeSource()
                     .getLocation()
                     .toURI());
 
-            String nombreActual = jarEnEjecucion.getName();
-            File carpetaDestino = jarEnEjecucion.getParentFile();
-
-            // Si se ejecuta desde el IDE (target/classes/), usar la carpeta del proyecto
-            if (!nombreActual.toLowerCase().endsWith(".jar") || carpetaDestino == null) {
-                carpetaDestino = new File(".");
-                nombreActual = "GestorAndroid-Viejo.jar";
+            if (!jarEnEjecucion.getName().toLowerCase().endsWith(".jar")) {
+                JOptionPane.showMessageDialog(null,
+                        "Estás ejecutando el proyecto desde el entorno de desarrollo (IntelliJ IDEA).\n" +
+                                "Para probar el auto-reemplazo del archivo, compila con Maven y ejecuta el .jar directamente.",
+                        "Aviso de Desarrollo",
+                        JOptionPane.INFORMATION_MESSAGE);
+                return;
             }
 
+            JDialog dialogo = new JDialog();
+            dialogo.setTitle("Descargando Actualización...");
+            dialogo.setSize(380, 130);
+            dialogo.setLocationRelativeTo(null);
+            dialogo.setLayout(new BorderLayout(10, 10));
+            dialogo.setDefaultCloseOperation(JDialog.DO_NOTHING_ON_CLOSE);
+
+            JLabel lblEstado = new JLabel("Conectando con GitHub...");
+            lblEstado.setBorder(new EmptyBorder(10, 15, 0, 15));
+            JProgressBar barra = new JProgressBar(0, 100);
+            barra.setStringPainted(true);
+            barra.setBorder(new EmptyBorder(0, 15, 10, 15));
+
+            dialogo.add(lblEstado, BorderLayout.NORTH);
+            dialogo.add(barra, BorderLayout.CENTER);
+
+            new Thread(() -> {
+                try {
+                    File carpetaDestino = jarEnEjecucion.getParentFile();
+                    File archivoTemporal = new File(carpetaDestino, "descarga_actualizacion.tmp");
+
+                    URL url = new URL(urlDescarga);
+                    HttpURLConnection conexion = (HttpURLConnection) url.openConnection();
+                    conexion.setRequestProperty("User-Agent", "Mozilla/5.0");
+
+                    int estado = conexion.getResponseCode();
+                    if (estado == HttpURLConnection.HTTP_MOVED_TEMP || estado == HttpURLConnection.HTTP_MOVED_PERM
+                            || estado == 307 || estado == 308) {
+                        String redireccion = conexion.getHeaderField("Location");
+                        conexion = (HttpURLConnection) new URL(redireccion).openConnection();
+                    }
+
+                    int tamanoTotal = conexion.getContentLength();
+
+                    try (InputStream entrada = conexion.getInputStream();
+                         FileOutputStream salida = new FileOutputStream(archivoTemporal)) {
+
+                        byte[] bufer = new byte[4096];
+                        int leidos;
+                        long acum = 0;
+
+                        while ((leidos = entrada.read(bufer)) != -1) {
+                            salida.write(bufer, 0, leidos);
+                            acum += leidos;
+
+                            if (tamanoTotal > 0) {
+                                int porcentaje = (int) ((acum * 100) / tamanoTotal);
+                                SwingUtilities.invokeLater(() -> {
+                                    barra.setValue(porcentaje);
+                                    lblEstado.setText("Descargando: " + porcentaje + "% completado");
+                                });
+                            }
+                        }
+                    }
+
+                    SwingUtilities.invokeLater(() -> {
+                        dialogo.dispose();
+                        JOptionPane.showMessageDialog(null,
+                                "Descarga completada.\nLa aplicación se reiniciará para aplicar los cambios.",
+                                "Actualización Lista",
+                                JOptionPane.INFORMATION_MESSAGE);
+
+                        ejecutarScriptActualizacion(archivoTemporal, nombreNuevoJar, jarEnEjecucion);
+                    });
+
+                } catch (Exception ex) {
+                    SwingUtilities.invokeLater(() -> {
+                        dialogo.dispose();
+                        JOptionPane.showMessageDialog(null,
+                                "Error durante la descarga:\n" + ex.getMessage(),
+                                "Error de Descarga",
+                                JOptionPane.ERROR_MESSAGE);
+                    });
+                }
+            }).start();
+
+            dialogo.setVisible(true);
+
+        } catch (Exception e) {
+            JOptionPane.showMessageDialog(null, "Error al determinar la ruta del ejecutable: " + e.getMessage());
+        }
+    }
+
+    private static void ejecutarScriptActualizacion(File archivoTemporal, String nombreNuevoJar, File jarEnEjecucion) {
+        try {
+            File carpetaDestino = jarEnEjecucion.getParentFile();
             File scriptBat = new File(carpetaDestino, "actualizar.bat");
             File scriptVbs = new File(carpetaDestino, "ocultar.vbs");
+            File nuevoJarFinal = new File(carpetaDestino, nombreNuevoJar);
 
-            // 1. Construcción del script por lotes (.bat)
             StringBuilder script = new StringBuilder();
             script.append("@echo off\r\n");
-            // Espera 2 segundos en segundo plano a que la JVM de Java se cierre por completo
-            script.append("timeout /t 2 /nobreak > nul\r\n");
+            // Espera 3 segundos a que Java libere completamente el archivo .jar
+            script.append("timeout /t 3 /nobreak > nul\r\n");
 
-            // Si el nombre cambió entre versiones, elimina la versión antigua
-            if (!nombreActual.equalsIgnoreCase(nombreNuevoJar)) {
-                script.append("if exist \"").append(nombreActual).append("\" del /f /q \"").append(nombreActual).append("\"\r\n");
+            // Si el nombre cambió respecto al que se estaba ejecutando, elimina el viejo
+            if (!jarEnEjecucion.getAbsolutePath().equalsIgnoreCase(nuevoJarFinal.getAbsolutePath())) {
+                script.append("if exist \"").append(jarEnEjecucion.getAbsolutePath()).append("\" del /f /q \"").append(jarEnEjecucion.getAbsolutePath()).append("\"\r\n");
             }
 
-            // Mueve el archivo descargado al nombre del nuevo .jar
-            script.append("move /y \"").append(archivoTemporal.getName()).append("\" \"").append(nombreNuevoJar).append("\"\r\n");
+            // Mueve el archivo temporal reemplazando el .jar final
+            script.append("move /y \"").append(archivoTemporal.getAbsolutePath()).append("\" \"").append(nuevoJarFinal.getAbsolutePath()).append("\"\r\n");
 
-            // Ejecuta el nuevo archivo .jar
-            script.append("start \"\" java -jar \"").append(nombreNuevoJar).append("\"\r\n");
+            // Cambia de directorio e inicia el nuevo .jar
+            script.append("cd /d \"").append(carpetaDestino.getAbsolutePath()).append("\"\r\n");
+            script.append("start \"\" java -jar \"").append(nuevoJarFinal.getName()).append("\"\r\n");
 
-            // Borra los scripts temporales creados
-            script.append("del \"").append(scriptVbs.getName()).append("\"\r\n");
+            // Elimina los archivos temporales de script
+            script.append("del \"").append(scriptVbs.getAbsolutePath()).append("\"\r\n");
             script.append("del \"%~f0\"\r\n");
 
             try (FileOutputStream fosBat = new FileOutputStream(scriptBat)) {
                 fosBat.write(script.toString().getBytes());
             }
 
-            // 2. Construcción del script VBScript (.vbs) para ocultar la ventana negra de CMD
-            // El parámetro '0' al final de Run indica ventana completamente invisible
+            // Script en VBScript para ejecutar en modo oculto sin ventanas de CMD
             String contenidoVbs = "Set WshShell = CreateObject(\"WScript.Shell\")\r\n" +
                     "WshShell.Run \"cmd /c \"\"" + scriptBat.getAbsolutePath() + "\"\"\", 0, False\r\n";
 
@@ -321,15 +296,12 @@ public class UpdateService {
                 fosVbs.write(contenidoVbs.getBytes());
             }
 
-            // 3. Ejecutar el VBScript de forma silenciosa con wscript.exe
             Runtime.getRuntime().exec("wscript.exe \"" + scriptVbs.getAbsolutePath() + "\"");
-
-            // 4. Cerrar la aplicación Java actual inmediatamente
             System.exit(0);
 
         } catch (Exception e) {
             JOptionPane.showMessageDialog(null,
-                    "No se pudo ejecutar el reemplazo silencioso:\n" + e.getMessage(),
+                    "No se pudo ejecutar el script de actualización:\n" + e.getMessage(),
                     "Error de Actualización",
                     JOptionPane.ERROR_MESSAGE);
         }
