@@ -4,6 +4,7 @@ import com.formdev.flatlaf.themes.FlatMacDarkLaf;
 import com.rsec.gestorapp.model.AppInfo;
 import com.rsec.gestorapp.model.Dispositivo;
 import com.rsec.gestorapp.service.ADBService;
+import com.rsec.gestorapp.service.UpdateService; // Servicio para comprobación de versiones en GitHub
 import com.rsec.gestorapp.ui.components.AppListRenderer;
 import com.rsec.gestorapp.ui.components.BotonTarjeta;
 import com.rsec.gestorapp.ui.components.DispositivoRenderer;
@@ -64,7 +65,6 @@ import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * Controlador principal y ventana de la aplicación GestorApp.
- * <p>
  * Coordina la interfaz gráfica en Java Swing con el servicio {@link ADBService},
  * proporcionando herramientas para la gestión de paquetes Android, transmisión de pantalla,
  * visor de logs en tiempo real y utilidades del sistema.
@@ -267,6 +267,11 @@ public class GestorApp extends JFrame {
         chkMostrarComandos.setFocusPainted(false);
         chkMostrarComandos.setToolTipText("Muestra en la consola el comando nativo equivalente");
 
+        // Botón para verificar actualizaciones en GitHub
+        JButton btnActualizaciones = UIFactory.crearBotonSecundario("🚀 Actualizaciones", new Dimension(145, 30));
+        btnActualizaciones.setToolTipText("Consulta en GitHub si existe una versión más reciente");
+        btnActualizaciones.addActionListener(e -> UpdateService.comprobarActualizacionesManual());
+
         JButton btnCopiar = UIFactory.crearBotonSecundario("📋 Copiar", new Dimension(100, 30));
         btnCopiar.addActionListener(e -> copiarConsola());
 
@@ -274,6 +279,7 @@ public class GestorApp extends JFrame {
         btnLimpiar.addActionListener(e -> consolaMensajes.setText(""));
 
         botonesSur.add(chkMostrarComandos);
+        botonesSur.add(btnActualizaciones); // Integrado en la barra
         botonesSur.add(btnCopiar);
         botonesSur.add(btnLimpiar);
         encabezadoSur.add(botonesSur, BorderLayout.EAST);

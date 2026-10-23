@@ -24,6 +24,7 @@
     </dependencies>
 
     <build>
+        <finalName>GestorAndroid</finalName>
         <plugins>
             <!-- Plugin para empaquetar todas las dependencias y la clase principal -->
             <plugin>
