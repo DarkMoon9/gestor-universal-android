@@ -1,50 +1,66 @@
 package com.rsec.gestorapp.service;
 
 import com.rsec.gestorapp.model.Dispositivo;
-
 import javax.imageio.ImageIO;
-import javax.swing.*;
-import java.awt.*;
+import javax.swing.Icon;
+import javax.swing.ImageIcon;
+import java.awt.Graphics2D;
+import java.awt.Image;
+import java.awt.RenderingHints;
 import java.awt.image.BufferedImage;
+import java.io.BufferedInputStream;
 import java.io.BufferedReader;
 import java.io.File;
-import java.io.InputStreamReader;
-import java.util.ArrayList;
-import java.util.List;
-import java.util.function.Consumer;
-import java.io.BufferedInputStream;
 import java.io.FileInputStream;
 import java.io.FileOutputStream;
 import java.io.InputStream;
+import java.io.InputStreamReader;
 import java.net.HttpURLConnection;
-import java.net.URI;
-import java.net.URL;
-import java.util.zip.ZipEntry;
-import java.util.zip.ZipInputStream;
 import java.net.InetSocketAddress;
 import java.net.Socket;
+import java.net.URI;
+import java.net.URL;
+import java.util.ArrayList;
+import java.util.HashSet;
+import java.util.List;
+import java.util.Set;
+import java.util.function.Consumer;
+import java.util.zip.ZipEntry;
+import java.util.zip.ZipInputStream;
 
 /**
- * Servicio encargado de la comunicación directa con ADB y utilidades del sistema.
+ * Servicio encargado de la orquestación y comunicación directa con el servidor ADB
+ * (Android Debug Bridge), gestión de subprocesos del sistema operativo, descarga
+ * dinámica de utilidades externas (Scrcpy) y extracción de recursos desde paquetes APK.
+ *
+ * @author Marco Vences
+ * @version 1.0
  */
 public class ADBService {
+
+    /** URL oficial de descarga de la versión portable de Scrcpy para Windows 64-bits. */
     private static final String URL_SCRCPY_ZIP = "https://github.com/Genymobile/scrcpy/releases/download/v2.4/scrcpy-win64-v2.4.zip";
 
     /**
-     * Puertos locales estándar evaluados por orden de prioridad:
-     * - 16384: Puerto oficial y principal de MuMu Player 12
-     * - 5555: Puerto estándar de BlueStacks, LDPlayer y emuladores AVD
-     * - 62001: Puerto primario de NoxPlayer
-     * - 21503: Puerto de MEmu Player
-     * - 7555: Puerto secundario de MuMu Player legacy
+     * Puertos locales estándar evaluados por orden de prioridad para la autoconexión de emuladores:
+     * <ul>
+     *   <li>16384: Puerto oficial y principal de MuMu Player 12</li>
+     *   <li>5555: Puerto estándar de BlueStacks, LDPlayer y emuladores AVD</li>
+     *   <li>62001: Puerto primario de NoxPlayer</li>
+     *   <li>21503: Puerto de MEmu Player</li>
+     *   <li>7555: Puerto secundario de MuMu Player legacy</li>
+     * </ul>
      */
     private static final int[] PUERTOS_EMULADORES = {
             16384, 5555, 62001, 21503, 7555
     };
 
     /**
-     * Busca los dispositivos conectados vía USB, Wi-Fi o Emuladores activos,
-     * filtrando automáticamente puertos redundantes para que cada emulador aparezca una sola vez.
+     * Busca asíncronamente los dispositivos conectados vía USB, Wi-Fi o Emuladores activos.
+     * Realiza una autoconexión previa por puertos de red y filtra instancias duplicadas en la lista final.
+     *
+     * @param callback Consumidor que recibe la lista procesada de objetos {@link Dispositivo}.
+     * @param logger   Consumidor para el registro de mensajes de estado en la consola de la UI.
      */
     public void buscarDispositivos(Consumer<List<Dispositivo>> callback, Consumer<String> logger) {
         new Thread(() -> {
@@ -78,7 +94,7 @@ public class ADBService {
 
                 // 3. FILTRO DE DEDUPLICACIÓN: Evita mostrar el mismo emulador varias veces
                 List<Dispositivo> listaFinal = new ArrayList<>();
-                java.util.Set<String> modelosEmuladoresRegistrados = new java.util.HashSet<>();
+                Set<String> modelosEmuladoresRegistrados = new HashSet<>();
 
                 for (Dispositivo disp : listaCruda) {
                     if (disp.isEsEmulador() && disp.getId().startsWith("127.0.0.1:")) {
@@ -112,7 +128,10 @@ public class ADBService {
     }
 
     /**
-     * Prueba los puertos locales de emuladores abiertos mediante sockets de respuesta rápida (80ms).
+     * Comprueba mediante sockets TCP de respuesta rápida (timeout 80ms) si los puertos
+     * conocidos de emuladores están abiertos en localhost y ejecuta 'adb connect' automáticamente.
+     *
+     * @param logger Consumidor para registrar los puertos enlazados.
      */
     private void autoConectarEmuladoresLocales(Consumer<String> logger) {
         for (int puerto : PUERTOS_EMULADORES) {
@@ -135,7 +154,9 @@ public class ADBService {
     }
 
     /**
-     * Desconecta de forma silenciosa un puerto secundario redundante en ADB.
+     * Desconecta de forma silenciosa un puerto secundario redundante en ADB para evitar duplicados.
+     *
+     * @param idDispositivo Dirección IP y puerto del dispositivo a desconectar (ej. "127.0.0.1:5555").
      */
     private void desconectarPuertoDuplicado(String idDispositivo) {
         try {
@@ -143,10 +164,14 @@ public class ADBService {
         } catch (Exception ignored) {}
     }
 
-
     /**
-     * Analiza el identificador y los atributos de 'adb devices -l' para determinar
+     * Analiza el identificador y los atributos devueltos por 'adb devices -l' para clasificar
      * si corresponde a un emulador conocido o a un dispositivo físico real.
+     *
+     * @param id          Identificador devuelto por ADB (serie USB o IP:puerto).
+     * @param estadoAdb   Estado de conexión reportado ("device", "unauthorized").
+     * @param partesLinea Arreglo de cadenas con los metadatos de la línea de ADB.
+     * @return Objeto {@link Dispositivo} instanciado con su clasificación correspondiente.
      */
     private Dispositivo clasificarDispositivo(String id, String estadoAdb, String[] partesLinea) {
         String modelo = "Android";
@@ -165,45 +190,29 @@ public class ADBService {
         boolean esEmulador = false;
         String tipoEmulador = null;
 
-        // ==============================================================
-        // 1. REGLAS HEURÍSTICAS DE DETECCIÓN DE EMULADORES POPULARES
-        // ==============================================================
-
-        // A. Android Studio AVD Oficial
+        // Reglas heurísticas de detección de emuladores
         if (idLower.startsWith("emulator-") || meta.contains("sdk_gphone") || meta.contains("goldfish") || meta.contains("ranchu")) {
             esEmulador = true;
             tipoEmulador = "Android Studio AVD";
             if (modelo.equalsIgnoreCase("Android") || modelo.toLowerCase().contains("sdk")) {
                 modelo = "Google Pixel AVD";
             }
-        }
-        // B. NoxPlayer (Usa habitualmente puertos 62001, 62025 o el nombre nox)
-        else if (idLower.contains(":62001") || idLower.contains(":62025") || meta.contains("nox")) {
+        } else if (idLower.contains(":62001") || idLower.contains(":62025") || meta.contains("nox")) {
             esEmulador = true;
             tipoEmulador = "NoxPlayer";
-        }
-        // C. MEmu Player (Usa habitualmente el puerto 21503 o huella memu)
-        else if (idLower.contains(":21503") || meta.contains("memu")) {
+        } else if (idLower.contains(":21503") || meta.contains("memu")) {
             esEmulador = true;
             tipoEmulador = "MEmu";
-        }
-        // D. MuMu Player de NetEase (Usa puertos 7555, 16384 o huella mumu)
-        else if (idLower.contains(":7555") || idLower.contains(":16384") || meta.contains("mumu") || meta.contains("netease")) {
+        } else if (idLower.contains(":7555") || idLower.contains(":16384") || meta.contains("mumu") || meta.contains("netease")) {
             esEmulador = true;
             tipoEmulador = "MuMu Player";
-        }
-        // E. Windows Subsystem for Android - WSA (Puerto 58526 o huella wsa)
-        else if (idLower.contains(":58526") || meta.contains("subsystem_for_android") || meta.contains("wsa")) {
+        } else if (idLower.contains(":58526") || meta.contains("subsystem_for_android") || meta.contains("wsa")) {
             esEmulador = true;
             tipoEmulador = "WSA Windows";
-        }
-        // F. Genymotion (Usa subred 192.168.56.* o huella genymotion / vbox)
-        else if (idLower.startsWith("192.168.56.") || meta.contains("genymotion") || meta.contains("vbox86")) {
+        } else if (idLower.startsWith("192.168.56.") || meta.contains("genymotion") || meta.contains("vbox86")) {
             esEmulador = true;
             tipoEmulador = "Genymotion";
-        }
-        // G. BlueStacks / LDPlayer (Ambos usan habitualmente 127.0.0.1:5555 o localhost:5555)
-        else if (idLower.startsWith("127.0.0.1:") || idLower.startsWith("localhost:")) {
+        } else if (idLower.startsWith("127.0.0.1:") || idLower.startsWith("localhost:")) {
             esEmulador = true;
             if (meta.contains("bluestacks") || meta.contains("bst")) {
                 tipoEmulador = "BlueStacks";
@@ -212,9 +221,7 @@ public class ADBService {
             } else {
                 tipoEmulador = "Emulador Virtual";
             }
-        }
-        // H. Cualquier otro emulador que reporte cadenas de emulación en sus metadatos
-        else if (meta.contains("emulator") || meta.contains("virtualbox") || meta.contains("qemu")) {
+        } else if (meta.contains("emulator") || meta.contains("virtualbox") || meta.contains("qemu")) {
             esEmulador = true;
             tipoEmulador = "Emulador";
         }
@@ -223,12 +230,12 @@ public class ADBService {
         return new Dispositivo(id, modelo, estadoFinal, esEmulador, tipoEmulador);
     }
 
-
-
-
-
     /**
-     * Obtiene la lista de aplicaciones instaladas por el usuario (terceros).
+     * Obtiene la lista de nombres de paquetes de aplicaciones de terceros instaladas en el dispositivo.
+     *
+     * @param d        Dispositivo objetivo.
+     * @param callback Consumidor que recibe la lista de identificadores de paquete.
+     * @param logger   Consumidor para publicar mensajes de estado.
      */
     public void listarPaquetes(Dispositivo d, Consumer<List<String>> callback, Consumer<String> logger) {
         new Thread(() -> {
@@ -254,20 +261,17 @@ public class ADBService {
     }
 
     /**
-     * Extrae el icono original de una aplicación desde el APK base en el dispositivo
-     * con soporte para Split APKs, nombres alternativos y selección por alta resolución.
+     * Extrae el icono representativo de una aplicación desde sus archivos APK en el dispositivo.
+     * Inspecciona la división base y los splits de densidad gráfica, aplicando un escalado suave a 32x32 píxeles.
+     * Almacena el resultado en la caché local en disco para lecturas subsiguientes.
      *
-     * @param d Dispositivo conectado.
-     * @param paquete Nombre del paquete (ej. com.google.android.calendar).
-     * @return Icono escalado a 32x32 píxeles o null si no se localiza ninguna imagen PNG.
-     */
-    /**
-     * Extrae el icono original de una aplicación inspeccionando tanto el APK base
-     * como sus divisiones (splits de densidad), guardándolo en disco local.
+     * @param d       Dispositivo donde está instalada la aplicación.
+     * @param paquete Nombre del paquete (ej. "com.whatsapp").
+     * @return Objeto {@link Icon} escalado o {@code null} si no se localiza ninguna imagen PNG extraíble.
      */
     public Icon extraerIconoApp(Dispositivo d, String paquete) {
         try {
-            // 1. Verificar si ya existe en la caché local
+            // 1. Verificar si ya existe en la caché local de disco
             File carpetaCache = new File("cache_iconos");
             if (!carpetaCache.exists()) {
                 carpetaCache.mkdirs();
@@ -299,7 +303,7 @@ public class ADBService {
                 return null;
             }
 
-            // Ordenamos para revisar primero los splits de densidad (xxhdpi, xhdpi) y el base.apk
+            // Ordenar para revisar primero los splits de densidad (xxhdpi, xhdpi) y base.apk
             todasLasRutas.sort((a, b) -> {
                 if (a.contains("hdpi") || a.contains("dpi")) return -1;
                 if (b.contains("hdpi") || b.contains("dpi")) return 1;
@@ -307,7 +311,6 @@ public class ADBService {
                 return 1;
             });
 
-            // Extraemos la última palabra del paquete para coincidencias personalizadas (ej. "vysor", "rootcheck")
             String[] partesPaquete = paquete.toLowerCase().split("\\.");
             String palabraClaveApp = partesPaquete[partesPaquete.length - 1];
 
@@ -372,7 +375,6 @@ public class ADBService {
                 }
                 pListar.waitFor();
 
-                // Si encontramos un candidato de alta relevancia (ic_launcher o similar), no necesitamos buscar más APKs
                 if (mejorPuntuacion >= 50) {
                     break;
                 }
@@ -395,7 +397,7 @@ public class ADBService {
                 g2.drawImage(imagenOriginal, 0, 0, 32, 32, null);
                 g2.dispose();
 
-                // Guardar en la caché local para siguientes lecturas instantáneas
+                // Guardar en la caché local
                 ImageIO.write(imgFinal, "png", archivoIcono);
                 return new ImageIcon(imgFinal);
             }
@@ -404,7 +406,12 @@ public class ADBService {
     }
 
     /**
-     * Instala una lista de archivos APK (soporta archivos únicos o múltiples splits).
+     * Instala una lista de archivos APK en el dispositivo objetivo.
+     * Selecciona automáticamente entre instalación simple (`adb install`) o múltiple (`adb install-multiple`).
+     *
+     * @param apks   Lista de archivos APK a instalar.
+     * @param d      Dispositivo objetivo.
+     * @param logger Consumidor para registrar el progreso y resultado de la instalación.
      */
     public void instalarApks(List<File> apks, Dispositivo d, Consumer<String> logger) {
         new Thread(() -> {
@@ -434,7 +441,12 @@ public class ADBService {
     }
 
     /**
-     * Extrae todos los APKs asociados a un paquete instalado hacia una carpeta en la computadora.
+     * Extrae todos los archivos APK asociados a un paquete instalado en el dispositivo hacia una carpeta local en la PC.
+     *
+     * @param paquete        Identificador del paquete a extraer (ej. "com.example.app").
+     * @param d              Dispositivo objetivo.
+     * @param carpetaDestino Directorio local donde se guardará la subcarpeta con los APKs.
+     * @param logger         Consumidor para reportar los archivos descargados.
      */
     public void extraerPaquete(String paquete, Dispositivo d, File carpetaDestino, Consumer<String> logger) {
         new Thread(() -> {
@@ -478,13 +490,21 @@ public class ADBService {
 
     /**
      * Desinstala una aplicación del dispositivo.
+     *
+     * @param paquete Identificador de paquete a eliminar.
+     * @param d       Dispositivo objetivo.
+     * @param logger  Consumidor para mensajes de estado.
      */
     public void desinstalarApp(String paquete, Dispositivo d, Consumer<String> logger) {
         ejecutarComandoSimple(new String[]{"adb", "-s", d.getId(), "uninstall", paquete}, "Desinstalando " + paquete + "...", logger);
     }
 
     /**
-     * Inicia la actividad principal de una aplicación en el dispositivo.
+     * Inicia la actividad principal de una aplicación en el dispositivo mediante la herramienta `monkey`.
+     *
+     * @param paquete Identificador de paquete a lanzar.
+     * @param d       Dispositivo objetivo.
+     * @param logger  Consumidor para mensajes de estado.
      */
     public void ejecutarApp(String paquete, Dispositivo d, Consumer<String> logger) {
         ejecutarComandoSimple(new String[]{"adb", "-s", d.getId(), "shell", "monkey", "-p", paquete, "-c", "android.intent.category.LAUNCHER", "1"},
@@ -492,7 +512,11 @@ public class ADBService {
     }
 
     /**
-     * Borra la memoria caché y datos de usuario de una aplicación.
+     * Elimina los datos de usuario y la memoria caché de una aplicación instalada.
+     *
+     * @param paquete Identificador de paquete.
+     * @param d       Dispositivo objetivo.
+     * @param logger  Consumidor para mensajes de estado.
      */
     public void limpiarDatosApp(String paquete, Dispositivo d, Consumer<String> logger) {
         ejecutarComandoSimple(new String[]{"adb", "-s", d.getId(), "shell", "pm", "clear", paquete},
@@ -500,7 +524,11 @@ public class ADBService {
     }
 
     /**
-     * Alinea un APK a bloques de 4 bytes utilizando zipalign.
+     * Alinea las fronteras de datos no comprimidos de un archivo APK a bloques de 4 bytes utilizando `zipalign`.
+     *
+     * @param entrada Archivo APK origen.
+     * @param salida  Archivo APK destino alineado.
+     * @param logger  Consumidor para mensajes de estado.
      */
     public void alinearApk(File entrada, File salida, Consumer<String> logger) {
         ejecutarComandoSimple(new String[]{"zipalign", "-v", "-p", "4", entrada.getAbsolutePath(), salida.getAbsolutePath()},
@@ -508,7 +536,10 @@ public class ADBService {
     }
 
     /**
-     * Firma un APK utilizando certificado de depuración con apksigner.
+     * Firma un APK con la clave oficial de depuración de Android mediante `apksigner`.
+     *
+     * @param apk    Archivo APK a firmar.
+     * @param logger Consumidor para mensajes de estado.
      */
     public void firmarApkDebug(File apk, Consumer<String> logger) {
         File debugKeystore = new File(System.getProperty("user.home") + File.separator + ".android" + File.separator + "debug.keystore");
@@ -527,15 +558,16 @@ public class ADBService {
         }, "Firmando APK con certificado debug...", logger);
     }
 
-
     /**
-     * Inicia la transmisión de pantalla con Scrcpy.
-     * Si no está instalado, lo descarga y descomprime automáticamente de forma dinámica.
+     * Inicia la transmisión de pantalla del dispositivo mediante Scrcpy.
+     * Si no se encuentra el ejecutable localmente, gestiona su descarga y descompresión automática.
+     *
+     * @param d      Dispositivo a proyectar.
+     * @param logger Consumidor para mensajes de registro.
      */
     public void iniciarScrcpyNativo(Dispositivo d, Consumer<String> logger) {
         new Thread(() -> {
             try {
-                // 1. Verificar si scrcpy.exe ya existe localmente; si no, descargarlo
                 File ejecutable = obtenerOInstalarScrcpy(logger);
                 if (ejecutable == null || !ejecutable.exists()) {
                     logger.accept("❌ No se pudo preparar Scrcpy para su ejecución.");
@@ -544,7 +576,6 @@ public class ADBService {
 
                 logger.accept("Iniciando transmisión de pantalla con Scrcpy...");
 
-                // 2. Construir el comando apuntando al ejecutable local descargado
                 List<String> comando = new ArrayList<>();
                 comando.add(ejecutable.getAbsolutePath());
                 comando.add("-s");
@@ -555,7 +586,6 @@ public class ADBService {
                 pb.redirectErrorStream(true);
                 Process proceso = pb.start();
 
-                // 3. Monitorear mensajes de salida en vivo
                 try (BufferedReader lector = new BufferedReader(new InputStreamReader(proceso.getInputStream()))) {
                     String linea;
                     while ((linea = lector.readLine()) != null) {
@@ -580,19 +610,19 @@ public class ADBService {
     }
 
     /**
-     * Busca el binario scrcpy.exe localmente. Si no existe, lo descarga desde internet.
+     * Verifica la existencia local de `scrcpy.exe`. Si no existe, invoca la rutina de descarga.
+     *
+     * @param logger Consumidor de registros.
+     * @return Objeto {@link File} del ejecutable o {@code null} en caso de fallo.
      */
     private File obtenerOInstalarScrcpy(Consumer<String> logger) {
-        // Carpeta donde residirá Scrcpy dentro de tu proyecto
         File carpetaDestino = new File("scrcpy");
         File ejecutable = new File(carpetaDestino, "scrcpy.exe");
 
-        // Si ya está descargado y listo, lo reutilizamos
         if (ejecutable.exists() && ejecutable.isFile()) {
             return ejecutable;
         }
 
-        // Si no existe, procedemos a la descarga automática
         logger.accept("🌐 Scrcpy no encontrado localmente. Iniciando descarga automática...");
         boolean exitoDescarga = descargarYDescomprimirScrcpy(carpetaDestino, logger);
 
@@ -605,7 +635,12 @@ public class ADBService {
     }
 
     /**
-     * Descarga el archivo comprimido ZIP desde GitHub y lo descomprime en la carpeta local.
+     * Descarga la distribución Zip de Scrcpy desde GitHub, procesa redirecciones HTTP
+     * y descomprime los archivos dentro del directorio local objetivo.
+     *
+     * @param carpetaDestino Directorio de destino para la extracción.
+     * @param logger         Consumidor para el reporte del porcentaje de descarga.
+     * @return {@code true} si la descarga y extracción finalizaron correctamente; {@code false} en caso contrario.
      */
     private boolean descargarYDescomprimirScrcpy(File carpetaDestino, Consumer<String> logger) {
         File archivoZipTemporal = new File("scrcpy_temp.zip");
@@ -614,11 +649,11 @@ public class ADBService {
                 carpetaDestino.mkdirs();
             }
 
-            // A. Conectar y descargar el archivo ZIP con seguimiento de bytes
+            // Descarga de archivo mediante HttpURLConnection
             URL url = URI.create(URL_SCRCPY_ZIP).toURL();
             HttpURLConnection conexion = (HttpURLConnection) url.openConnection();
             conexion.setRequestProperty("User-Agent", "Mozilla/5.0");
-            conexion.setInstanceFollowRedirects(true); // Maneja redirecciones de GitHub
+            conexion.setInstanceFollowRedirects(true);
 
             int respuesta = conexion.getResponseCode();
             if (respuesta == HttpURLConnection.HTTP_MOVED_PERM || respuesta == HttpURLConnection.HTTP_MOVED_TEMP) {
@@ -651,15 +686,13 @@ public class ADBService {
                 }
             }
 
-            // B. Descomprimir el contenido dentro de la carpeta local scrcpy/
+            // Descompresión del archivo ZIP
             logger.accept("📦 Descomprimiendo archivos de Scrcpy...");
             try (ZipInputStream zis = new ZipInputStream(new FileInputStream(archivoZipTemporal))) {
                 ZipEntry entrada;
                 while ((entrada = zis.getNextEntry()) != null) {
                     String nombreEntrada = entrada.getName();
 
-                    // El ZIP de GitHub incluye una carpeta raíz interna (ej: scrcpy-win64-v2.4/scrcpy.exe).
-                    // Quitamos esa primera carpeta para que los archivos queden limpios en scrcpy/
                     if (nombreEntrada.contains("/")) {
                         nombreEntrada = nombreEntrada.substring(nombreEntrada.indexOf("/") + 1);
                     }
@@ -674,7 +707,6 @@ public class ADBService {
                     if (entrada.isDirectory()) {
                         archivoSalida.mkdirs();
                     } else {
-                        // Asegurar la existencia de directorios padres
                         if (archivoSalida.getParentFile() != null) {
                             archivoSalida.getParentFile().mkdirs();
                         }
@@ -691,7 +723,6 @@ public class ADBService {
                 }
             }
 
-            // C. Limpiar el archivo temporal descargado
             if (archivoZipTemporal.exists()) {
                 archivoZipTemporal.delete();
             }
@@ -707,18 +738,13 @@ public class ADBService {
         }
     }
 
-
-
-
-
-
-
-
-
-
-
     /**
-     * Toma una captura de pantalla y la guarda directamente en el archivo destino en la PC.
+     * Obtiene una captura de pantalla del dispositivo y la almacena en el archivo especificado en la PC.
+     *
+     * @param d              Dispositivo objetivo.
+     * @param archivoDestino Archivo de salida PNG en el sistema local.
+     * @param logger         Consumidor para registros.
+     * @param onFinish       Tarea ejecutable tras finalizar el guardado.
      */
     public void tomarCapturaPantalla(Dispositivo d, File archivoDestino, Consumer<String> logger, Runnable onFinish) {
         new Thread(() -> {
@@ -742,8 +768,11 @@ public class ADBService {
     }
 
     /**
-     * Inicia la lectura continua del flujo de Logcat del sistema.
-     * @return El proceso en ejecución para poder cerrarlo cuando el usuario cierre la ventana de logs.
+     * Inicia la lectura continua en segundo plano del flujo de Logcat del dispositivo.
+     *
+     * @param d               Dispositivo objetivo.
+     * @param consumidorLinea Consumidor que procesa cada línea de log generada por el sistema.
+     * @return El objeto {@link Process} en ejecución para permitir su posterior finalización.
      */
     public Process iniciarLogcat(Dispositivo d, Consumer<String> consumidorLinea) {
         try {
@@ -771,6 +800,13 @@ public class ADBService {
     // MÉTODOS AUXILIARES REUTILIZABLES
     // ==========================================
 
+    /**
+     * Método auxiliar privado que ejecuta un comando externo en un hilo secundario independiente.
+     *
+     * @param comando       Arreglo con el comando y sus argumentos.
+     * @param mensajeInicio Mensaje informativo enviado al logger antes de iniciar.
+     * @param logger        Consumidor para el registro de salida.
+     */
     private void ejecutarComandoSimple(String[] comando, String mensajeInicio, Consumer<String> logger) {
         new Thread(() -> {
             try {
@@ -783,6 +819,12 @@ public class ADBService {
         }).start();
     }
 
+    /**
+     * Lee la salida estándar de un proceso e informa los resultados relevantes al logger.
+     *
+     * @param p      Proceso en ejecución.
+     * @param logger Consumidor para registrar la salida.
+     */
     private void reportarSalidaProceso(Process p, Consumer<String> logger) {
         try {
             BufferedReader lector = new BufferedReader(new InputStreamReader(p.getInputStream()));

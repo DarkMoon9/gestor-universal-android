@@ -1,13 +1,35 @@
 package com.rsec.gestorapp.ui;
 
 import com.formdev.flatlaf.themes.FlatMacDarkLaf;
+import com.rsec.gestorapp.model.AppInfo;
 import com.rsec.gestorapp.model.Dispositivo;
 import com.rsec.gestorapp.service.ADBService;
+import com.rsec.gestorapp.ui.components.AppListRenderer;
 import com.rsec.gestorapp.ui.components.BotonTarjeta;
 import com.rsec.gestorapp.ui.components.DispositivoRenderer;
 import com.rsec.gestorapp.ui.components.UIFactory;
+
 import javax.imageio.ImageIO;
-import javax.swing.*;
+import javax.swing.BorderFactory;
+import javax.swing.DefaultListModel;
+import javax.swing.Icon;
+import javax.swing.JButton;
+import javax.swing.JCheckBox;
+import javax.swing.JComboBox;
+import javax.swing.JDialog;
+import javax.swing.JFileChooser;
+import javax.swing.JFrame;
+import javax.swing.JLabel;
+import javax.swing.JList;
+import javax.swing.JPanel;
+import javax.swing.JScrollPane;
+import javax.swing.JTabbedPane;
+import javax.swing.JTextField;
+import javax.swing.JTextPane;
+import javax.swing.JToggleButton;
+import javax.swing.ListSelectionModel;
+import javax.swing.SwingUtilities;
+import javax.swing.UIManager;
 import javax.swing.border.EmptyBorder;
 import javax.swing.event.DocumentEvent;
 import javax.swing.event.DocumentListener;
@@ -16,7 +38,16 @@ import javax.swing.text.DefaultCaret;
 import javax.swing.text.Style;
 import javax.swing.text.StyleConstants;
 import javax.swing.text.StyledDocument;
-import java.awt.*;
+import java.awt.BorderLayout;
+import java.awt.Color;
+import java.awt.Dimension;
+import java.awt.FlowLayout;
+import java.awt.Font;
+import java.awt.Frame;
+import java.awt.GridLayout;
+import java.awt.Image;
+import java.awt.Toolkit;
+import java.awt.Window;
 import java.awt.datatransfer.DataFlavor;
 import java.awt.datatransfer.StringSelection;
 import java.awt.datatransfer.Transferable;
@@ -25,31 +56,76 @@ import java.awt.event.MouseAdapter;
 import java.awt.event.MouseEvent;
 import java.io.File;
 import java.text.SimpleDateFormat;
-import java.util.*;
-import javax.swing.Icon;
+import java.util.ArrayList;
+import java.util.Date;
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * Controlador principal y ventana de la aplicación GestorApp.
+ * <p>
+ * Coordina la interfaz gráfica en Java Swing con el servicio {@link ADBService},
+ * proporcionando herramientas para la gestión de paquetes Android, transmisión de pantalla,
+ * visor de logs en tiempo real y utilidades del sistema.
+ *
+ * @author Marco Vences
+ * @version 1.0
  */
 public class GestorApp extends JFrame {
 
+    /**
+     * Área de texto enriquecido para la consola de registros de la interfaz.
+     */
     private JTextPane consolaMensajes;
+
+    /**
+     * Selector desplegable con la lista de dispositivos ADB detectados.
+     */
     private JComboBox<Dispositivo> menuDispositivos;
+
+    /**
+     * Campo de entrada para el nombre de paquete objetivo (ej. "com.whatsapp").
+     */
     private JTextField entradaPaquete;
-    private JCheckBox chkMostrarComandos; // Casilla para activar los comandos didácticos
+
+    /**
+     * Casilla de verificación para mostrar los comandos ADB nativos equivalentes en la consola.
+     */
+    private JCheckBox chkMostrarComandos;
+
+    /**
+     * Servicio de comunicación y subprocesos ADB.
+     */
     private ADBService adbService;
+
+    /**
+     * Formateador de hora para los marcas de tiempo (timestamps) de la consola.
+     */
     private SimpleDateFormat formatoHora = new SimpleDateFormat("HH:mm:ss");
+
+    /**
+     * Mapa concurrente en memoria RAM para almacenar temporalmente los iconos de las aplicaciones.
+     */
     private Map<String, Icon> cacheIconos = new ConcurrentHashMap<>();
 
+    /**
+     * Constructor por defecto. Inicializa la instancia del servicio de comunicaciones ADB.
+     */
     public GestorApp() {
         this.adbService = new ADBService();
     }
 
+    /**
+     * Punto de entrada principal para la ejecución de la aplicación.
+     * Configura el tema visual oscuro FlatLaf e inicia la ventana en el hilo de eventos de Swing (EDT).
+     *
+     * @param args Argumentos de la línea de comandos (no utilizados).
+     */
     public static void main(String[] args) {
         SwingUtilities.invokeLater(() -> {
             try {
+                // Personalización global de curvatura para componentes de FlatLaf
                 UIManager.put("Button.arc", 10);
                 UIManager.put("Component.arc", 10);
                 UIManager.put("TextComponent.arc", 10);
@@ -61,8 +137,21 @@ public class GestorApp extends JFrame {
         });
     }
 
+    /**
+     * Construye y ensambla todos los paneles y componentes de la ventana principal.
+     */
     private void construirVentana() {
         setTitle("Gestor Universal Android");
+        try {
+            // Carga la imagen desde la carpeta de recursos del proyecto
+            java.net.URL urlIcono = getClass().getResource("/android.png");
+            if (urlIcono != null) {
+                Image iconoApp = Toolkit.getDefaultToolkit().getImage(urlIcono);
+                setIconImage(iconoApp); // Establece el icono en la ventana y la barra de tareas
+            }
+        } catch (Exception e) {
+            System.err.println("No se pudo cargar el icono de la aplicación: " + e.getMessage());
+        }
         setSize(950, 750);
         setDefaultCloseOperation(JFrame.EXIT_ON_CLOSE);
         setLocationRelativeTo(null);
@@ -70,13 +159,13 @@ public class GestorApp extends JFrame {
         getContentPane().setBackground(new Color(18, 22, 32));
 
         // ==========================================
-        // PANEL SUPERIOR: Configuración
+        // PANEL SUPERIOR: Configuración de Dispositivo y App
         // ==========================================
         JPanel panelNorte = new JPanel(new GridLayout(1, 2, 15, 0));
         panelNorte.setOpaque(false);
         panelNorte.setBorder(new EmptyBorder(15, 15, 5, 15));
 
-        // Sección Dispositivo
+        // Sección Dispositivo ADB
         JPanel panelDisp = UIFactory.crearContenedorSeccion();
         panelDisp.add(UIFactory.crearEncabezado("📱", "Dispositivo ADB", "Selecciona el equipo a gestionar"), BorderLayout.NORTH);
 
@@ -93,7 +182,7 @@ public class GestorApp extends JFrame {
         controlesDisp.add(btnRefrescar, BorderLayout.EAST);
         panelDisp.add(controlesDisp, BorderLayout.CENTER);
 
-        // Sección Aplicación
+        // Sección Selección de Aplicación
         JPanel panelApp = UIFactory.crearContenedorSeccion();
         panelApp.add(UIFactory.crearEncabezado("📦", "Aplicación", "Escribe el nombre del paquete"), BorderLayout.NORTH);
 
@@ -114,7 +203,7 @@ public class GestorApp extends JFrame {
         add(panelNorte, BorderLayout.NORTH);
 
         // ==========================================
-        // PANEL CENTRAL: Acciones en Pestañas
+        // PANEL CENTRAL: Acciones organizadas en Pestañas
         // ==========================================
         JPanel panelCentral = new JPanel(new BorderLayout());
         panelCentral.setOpaque(false);
@@ -124,7 +213,7 @@ public class GestorApp extends JFrame {
         panelPestanas.setFont(new Font("Segoe UI Emoji", Font.BOLD, 13));
         panelPestanas.setFocusable(false);
 
-        // Pestaña 1: Aplicaciones
+        // Pestaña 1: Gestión de Aplicaciones
         JPanel gridApps = new JPanel(new GridLayout(4, 2, 15, 15));
         gridApps.setOpaque(false);
         gridApps.setBorder(new EmptyBorder(15, 15, 15, 15));
@@ -139,7 +228,7 @@ public class GestorApp extends JFrame {
 
         panelPestanas.addTab("📦  Gestión de Apps", gridApps);
 
-        // Pestaña 2: Herramientas de Sistema (Fila simétrica de 3 tarjetas)
+        // Pestaña 2: Herramientas de Sistema
         JPanel panelContenedorSistema = new JPanel(new BorderLayout());
         panelContenedorSistema.setOpaque(false);
 
@@ -158,7 +247,7 @@ public class GestorApp extends JFrame {
         add(panelCentral, BorderLayout.CENTER);
 
         // ==========================================
-        // PANEL INFERIOR: Consola de Registro
+        // PANEL INFERIOR: Consola de Registro e Historial
         // ==========================================
         JPanel panelSur = new JPanel(new BorderLayout(0, 10));
         panelSur.setOpaque(false);
@@ -171,7 +260,6 @@ public class GestorApp extends JFrame {
         JPanel botonesSur = new JPanel(new FlowLayout(FlowLayout.RIGHT, 12, 0));
         botonesSur.setOpaque(false);
 
-        // Configuración visual de la casilla de verificación
         chkMostrarComandos = new JCheckBox("Ver comandos ADB");
         chkMostrarComandos.setOpaque(false);
         chkMostrarComandos.setForeground(new Color(180, 205, 235));
@@ -204,10 +292,17 @@ public class GestorApp extends JFrame {
         panelSur.add(scrollConsola, BorderLayout.CENTER);
         add(panelSur, BorderLayout.SOUTH);
 
+        // Carga inicial de dispositivos al abrir la ventana
         actualizarDispositivos();
         setVisible(true);
     }
 
+    /**
+     * Registra un mensaje formateado con la hora actual en la consola de la UI.
+     * Asigna colores según el nivel del mensaje (éxito, error, comando CMD, etc.).
+     *
+     * @param texto Cadena de texto a mostrar en el panel de logs.
+     */
     private void registrarMensaje(String texto) {
         SwingUtilities.invokeLater(() -> {
             try {
@@ -217,24 +312,26 @@ public class GestorApp extends JFrame {
                 String timestamp = "[" + formatoHora.format(new Date()) + "] ";
 
                 if (texto.startsWith("✅") || texto.startsWith("Descargando:") || texto.startsWith("📦")) {
-                    StyleConstants.setForeground(estilo, new Color(76, 175, 80));
+                    StyleConstants.setForeground(estilo, new Color(76, 175, 80)); // Verde éxito
                 } else if (texto.startsWith("❌") || texto.startsWith("⚠")) {
-                    StyleConstants.setForeground(estilo, new Color(244, 67, 54));
+                    StyleConstants.setForeground(estilo, new Color(244, 67, 54)); // Rojo error
                 } else if (texto.startsWith("💻")) {
-                    // Color cian destacado para comandos de consola
-                    StyleConstants.setForeground(estilo, new Color(77, 208, 225));
+                    StyleConstants.setForeground(estilo, new Color(77, 208, 225)); // Cian comandos
                 } else {
-                    StyleConstants.setForeground(estilo, new Color(220, 220, 220));
+                    StyleConstants.setForeground(estilo, new Color(220, 220, 220)); // Gris claro normal
                 }
 
                 doc.insertString(doc.getLength(), timestamp + texto + "\n", estilo);
                 consolaMensajes.setCaretPosition(doc.getLength());
-            } catch (Exception ignored) {}
+            } catch (Exception ignored) {
+            }
         });
     }
 
     /**
-     * Muestra el comando en consola si el usuario marcó la casilla.
+     * Publica el comando ADB ejecutado en la consola si la casilla correspondiente está marcada.
+     *
+     * @param comando Cadena con el comando nativo.
      */
     private void mostrarComandoSiActivo(String comando) {
         if (chkMostrarComandos != null && chkMostrarComandos.isSelected()) {
@@ -242,11 +339,17 @@ public class GestorApp extends JFrame {
         }
     }
 
+    /**
+     * Copia el texto completo de la consola de mensajes al portapapeles del sistema operativo.
+     */
     private void copiarConsola() {
         String texto = consolaMensajes.getText();
         Toolkit.getDefaultToolkit().getSystemClipboard().setContents(new StringSelection(texto), null);
     }
 
+    /**
+     * Llama al servicio ADB para escanear y actualizar la lista de dispositivos en el selector.
+     */
     private void actualizarDispositivos() {
         mostrarComandoSiActivo("adb devices -l");
         adbService.buscarDispositivos(
@@ -264,6 +367,11 @@ public class GestorApp extends JFrame {
         );
     }
 
+    /**
+     * Obtiene el dispositivo actualmente seleccionado en el combo desplegable.
+     *
+     * @return Objeto {@link Dispositivo} seleccionado o {@code null} si no hay dispositivos conectados.
+     */
     private Dispositivo obtenerDispositivoValido() {
         Dispositivo d = (Dispositivo) menuDispositivos.getSelectedItem();
         if (d == null || d.getId().equals("Ninguno")) {
@@ -273,6 +381,9 @@ public class GestorApp extends JFrame {
         return d;
     }
 
+    /**
+     * Inicia la consulta de aplicaciones de terceros y abre la ventana modal de búsqueda.
+     */
     private void iniciarBuscadorApps() {
         Dispositivo d = obtenerDispositivoValido();
         if (d == null) return;
@@ -291,12 +402,11 @@ public class GestorApp extends JFrame {
     }
 
     /**
-     * Elimina físicamente del disco local todas las imágenes PNG guardadas en cache_iconos.
+     * Elimina físicamente del disco local todas las imágenes PNG guardadas en la carpeta 'cache_iconos'.
      */
     private void vaciarCacheDisco() {
         File carpeta = new File("cache_iconos");
         if (carpeta.exists() && carpeta.isDirectory()) {
-            // Filtramos únicamente los archivos que terminen en .png
             File[] archivos = carpeta.listFiles((dir, name) -> name.toLowerCase().endsWith(".png"));
             if (archivos != null) {
                 for (File f : archivos) {
@@ -316,7 +426,6 @@ public class GestorApp extends JFrame {
         Dispositivo dispositivoActual = obtenerDispositivoValido();
         if (dispositivoActual == null) return;
 
-        // 1. Configuración de la ventana modal
         Window parentWindow = SwingUtilities.getWindowAncestor(entradaPaquete);
         JDialog dialogo = new JDialog((Frame) parentWindow, "Buscar Aplicación", true);
         dialogo.setSize(540, 600);
@@ -324,7 +433,7 @@ public class GestorApp extends JFrame {
         dialogo.setLocationRelativeTo(parentWindow);
         dialogo.getContentPane().setBackground(new Color(18, 22, 32));
 
-        // 2. Panel superior: Barra de búsqueda y botón de limpiar caché
+        // Panel superior: Barra de búsqueda y botón de limpiar caché
         JPanel panelSuperior = new JPanel(new BorderLayout(10, 0));
         panelSuperior.setOpaque(false);
         panelSuperior.setBorder(new EmptyBorder(15, 15, 0, 15));
@@ -336,19 +445,18 @@ public class GestorApp extends JFrame {
         panelSuperior.add(campoFiltro, BorderLayout.CENTER);
         panelSuperior.add(btnLimpiarCache, BorderLayout.EAST);
 
-        // 3. Preparación de los datos iniciales
-        List<com.rsec.gestorapp.model.AppInfo> appsTotales = new ArrayList<>();
+        // Preparación del modelo de datos de aplicaciones
+        List<AppInfo> appsTotales = new ArrayList<>();
         for (String pkg : paquetesTotales) {
             Icon iconoCache = cacheIconos.get(pkg);
-            appsTotales.add(new com.rsec.gestorapp.model.AppInfo(pkg, iconoCache));
+            appsTotales.add(new AppInfo(pkg, iconoCache));
         }
 
-        DefaultListModel<com.rsec.gestorapp.model.AppInfo> modeloLista = new DefaultListModel<>();
+        DefaultListModel<AppInfo> modeloLista = new DefaultListModel<>();
         appsTotales.forEach(modeloLista::addElement);
 
-        // 4. Configuración del componente visual JList
-        JList<com.rsec.gestorapp.model.AppInfo> listaPaquetes = new JList<>(modeloLista);
-        listaPaquetes.setCellRenderer(new com.rsec.gestorapp.ui.components.AppListRenderer());
+        JList<AppInfo> listaPaquetes = new JList<>(modeloLista);
+        listaPaquetes.setCellRenderer(new AppListRenderer());
         listaPaquetes.setSelectionMode(ListSelectionModel.SINGLE_SELECTION);
         listaPaquetes.setBackground(new Color(18, 22, 32));
 
@@ -357,7 +465,7 @@ public class GestorApp extends JFrame {
         scrollLista.setOpaque(false);
         scrollLista.getViewport().setOpaque(false);
 
-        // 5. Panel inferior: Instrucciones y contador discreto de avance
+        // Panel inferior: Contador y progreso
         JPanel panelInferior = new JPanel(new BorderLayout(10, 0));
         panelInferior.setOpaque(false);
         panelInferior.setBorder(new EmptyBorder(5, 15, 15, 15));
@@ -373,15 +481,14 @@ public class GestorApp extends JFrame {
         panelInferior.add(etiquetaInstruccion, BorderLayout.WEST);
         panelInferior.add(lblContador, BorderLayout.EAST);
 
-        // 6. Rutina asíncrona para descargar iconos en segundo plano
+        // Tarea en segundo plano para cargar los iconos
         Runnable tareaCargarIconos = () -> new Thread(() -> {
             int total = appsTotales.size();
             int procesados = 0;
 
-            for (com.rsec.gestorapp.model.AppInfo app : appsTotales) {
+            for (AppInfo app : appsTotales) {
                 String pkg = app.getPaquete();
 
-                // Si no se encuentra en memoria caché, consultamos el servicio
                 if (!cacheIconos.containsKey(pkg)) {
                     Icon iconoReal = adbService.extraerIconoApp(dispositivoActual, pkg);
                     if (iconoReal != null) {
@@ -389,8 +496,7 @@ public class GestorApp extends JFrame {
                         app.setIcono(iconoReal);
                         SwingUtilities.invokeLater(listaPaquetes::repaint);
                     } else {
-                        // Caché negativa para aplicaciones sin imagen PNG extraíble
-                        cacheIconos.put(pkg, com.rsec.gestorapp.ui.components.AppListRenderer.getIconoProvisional());
+                        cacheIconos.put(pkg, AppListRenderer.getIconoProvisional());
                     }
                 } else {
                     app.setIcono(cacheIconos.get(pkg));
@@ -412,34 +518,41 @@ public class GestorApp extends JFrame {
             }
         }).start();
 
-        // 7. Acción del botón "Limpiar Caché"
+        // Acción del botón para purgar la caché
         btnLimpiarCache.addActionListener(e -> {
             btnLimpiarCache.setEnabled(false);
             vaciarCacheDisco();
             cacheIconos.clear();
 
-            // Restablecer iconos provisionales en los elementos de la lista
-            for (com.rsec.gestorapp.model.AppInfo app : appsTotales) {
+            for (AppInfo app : appsTotales) {
                 app.setIcono(null);
             }
             listaPaquetes.repaint();
 
             lblContador.setText("Caché borrada. Recargando...");
-            lblContador.setForeground(new Color(255, 193, 7)); // Color ámbar durante la purga
+            lblContador.setForeground(new Color(255, 193, 7));
 
-            // Iniciar de nuevo la descarga en segundo plano
             tareaCargarIconos.run();
         });
 
-        // 8. Evento de filtrado en tiempo real al escribir
+        // Filtrado en tiempo real
         campoFiltro.getDocument().addDocumentListener(new DocumentListener() {
-            public void insertUpdate(DocumentEvent e) { filtrar(); }
-            public void removeUpdate(DocumentEvent e) { filtrar(); }
-            public void changedUpdate(DocumentEvent e) { filtrar(); }
+            public void insertUpdate(DocumentEvent e) {
+                filtrar();
+            }
+
+            public void removeUpdate(DocumentEvent e) {
+                filtrar();
+            }
+
+            public void changedUpdate(DocumentEvent e) {
+                filtrar();
+            }
+
             private void filtrar() {
                 String texto = campoFiltro.getText().toLowerCase().trim();
                 modeloLista.clear();
-                for (com.rsec.gestorapp.model.AppInfo app : appsTotales) {
+                for (AppInfo app : appsTotales) {
                     if (app.getPaquete().toLowerCase().contains(texto) ||
                             app.getNombreVisible().toLowerCase().contains(texto)) {
                         modeloLista.addElement(app);
@@ -448,11 +561,11 @@ public class GestorApp extends JFrame {
             }
         });
 
-        // 9. Evento de selección por doble clic
+        // Evento de selección con doble clic
         listaPaquetes.addMouseListener(new MouseAdapter() {
             public void mouseClicked(MouseEvent e) {
                 if (e.getClickCount() == 2) {
-                    com.rsec.gestorapp.model.AppInfo seleccion = listaPaquetes.getSelectedValue();
+                    AppInfo seleccion = listaPaquetes.getSelectedValue();
                     if (seleccion != null) {
                         entradaPaquete.setText(seleccion.getPaquete());
                         dialogo.dispose();
@@ -462,16 +575,17 @@ public class GestorApp extends JFrame {
             }
         });
 
-        // 10. Ensamblado final y lanzamiento
         dialogo.add(panelSuperior, BorderLayout.NORTH);
         dialogo.add(scrollLista, BorderLayout.CENTER);
         dialogo.add(panelInferior, BorderLayout.SOUTH);
 
-        // Lanzar la descarga inicial y abrir el diálogo
         tareaCargarIconos.run();
         dialogo.setVisible(true);
     }
 
+    /**
+     * Inicia el proceso de extracción de los archivos APK de la aplicación seleccionada hacia el PC.
+     */
     private void iniciarExtraccion() {
         String paquete = entradaPaquete.getText().trim();
         Dispositivo d = obtenerDispositivoValido();
@@ -489,8 +603,7 @@ public class GestorApp extends JFrame {
     }
 
     /**
-     * Inicia la instalación con detección automática de Splits.
-     * El usuario solo hace clic en un archivo y el sistema reúne el resto automáticamente.
+     * Inicia la instalación con detección automática de partes divididas (Splits).
      */
     private void iniciarInstalacion() {
         Dispositivo d = obtenerDispositivoValido();
@@ -499,9 +612,7 @@ public class GestorApp extends JFrame {
         JFileChooser selector = new JFileChooser();
         selector.setDialogTitle("Selecciona el APK (se detectarán los splits automáticamente)");
         selector.setFileSelectionMode(JFileChooser.FILES_ONLY);
-        selector.setMultiSelectionEnabled(false); // Solo requiere un clic normal del usuario
-
-        // Filtramos para mostrar únicamente archivos APK
+        selector.setMultiSelectionEnabled(false);
         selector.setFileFilter(new FileNameExtensionFilter("Archivos de Aplicación Android (*.apk)", "apk"));
 
         if (selector.showOpenDialog(this) == JFileChooser.APPROVE_OPTION) {
@@ -511,10 +622,8 @@ public class GestorApp extends JFrame {
                 return;
             }
 
-            // Detección automática de todos los splits en la misma carpeta
             List<File> apksAInstalar = recolectarSplitsAutomaticamente(archivoElegido);
 
-            // Registro didáctico del comando ADB equivalente
             if (apksAInstalar.size() == 1) {
                 mostrarComandoSiActivo("adb -s " + d.getId() + " install -r -d \"" + apksAInstalar.get(0).getName() + "\"");
                 registrarMensaje("📦 Instalando APK único: " + apksAInstalar.get(0).getName());
@@ -523,33 +632,28 @@ public class GestorApp extends JFrame {
                 registrarMensaje("📦 Detectados automáticamente " + apksAInstalar.size() + " Split APKs. Iniciando instalación combinada...");
             }
 
-            // Llamada al servicio en segundo plano
             adbService.instalarApks(apksAInstalar, d, this::registrarMensaje);
         }
     }
 
     /**
-     * Inspecciona la carpeta del APK seleccionado. Si contiene múltiples archivos .apk,
-     * los agrupa todos de manera automática asegurando que 'base.apk' sea el primero.
+     * Inspecciona la carpeta del APK elegido para agrupar automáticamente archivos Split APKs.
      *
-     * @param archivoElegido El archivo .apk sobre el cual el usuario hizo clic.
+     * @param archivoElegido El archivo .apk sobre el cual se hizo clic.
      * @return Lista completa de APKs a instalar juntos.
      */
     private List<File> recolectarSplitsAutomaticamente(File archivoElegido) {
-        List<File> resultado = new java.util.ArrayList<>();
+        List<File> resultado = new ArrayList<>();
         File carpetaContenedora = archivoElegido.getParentFile();
 
         if (carpetaContenedora != null && carpetaContenedora.isDirectory()) {
-            // Obtenemos todos los archivos que terminen en .apk dentro de la misma carpeta
             File[] todosLosApks = carpetaContenedora.listFiles((dir, name) -> name.toLowerCase().endsWith(".apk"));
 
             if (todosLosApks != null && todosLosApks.length > 1) {
-                // Hay múltiples APKs (caso de Split APKs)
                 File baseApk = null;
-                List<File> configs = new java.util.ArrayList<>();
+                List<File> configs = new ArrayList<>();
 
                 for (File apk : todosLosApks) {
-                    // Identificamos el APK base principal
                     if (apk.getName().equalsIgnoreCase("base.apk")) {
                         baseApk = apk;
                     } else {
@@ -557,7 +661,6 @@ public class GestorApp extends JFrame {
                     }
                 }
 
-                // El APK base debe ser el primero de la lista si existe
                 if (baseApk != null) {
                     resultado.add(baseApk);
                 }
@@ -567,11 +670,13 @@ public class GestorApp extends JFrame {
             }
         }
 
-        // Si es una aplicación simple (un solo APK), solo se añade ese archivo
         resultado.add(archivoElegido);
         return resultado;
     }
 
+    /**
+     * Ejecuta el comando de alineación de bloques de memoria mediante `zipalign`.
+     */
     private void iniciarAlineacion() {
         JFileChooser selectorEntrada = new JFileChooser();
         selectorEntrada.setFileFilter(new FileNameExtensionFilter("Archivo APK", "apk"));
@@ -585,6 +690,9 @@ public class GestorApp extends JFrame {
         adbService.alinearApk(selectorEntrada.getSelectedFile(), selectorSalida.getSelectedFile(), this::registrarMensaje);
     }
 
+    /**
+     * Ejecuta la firma del APK utilizando el certificado de depuración mediante `apksigner`.
+     */
     private void iniciarFirma() {
         JFileChooser selector = new JFileChooser();
         selector.setFileFilter(new FileNameExtensionFilter("Archivo APK", "apk"));
@@ -594,6 +702,9 @@ public class GestorApp extends JFrame {
         }
     }
 
+    /**
+     * Solicita la desinstalación de la aplicación especificada en el campo de paquete.
+     */
     private void iniciarDesinstalacion() {
         String paquete = entradaPaquete.getText().trim();
         Dispositivo d = obtenerDispositivoValido();
@@ -606,6 +717,9 @@ public class GestorApp extends JFrame {
         adbService.desinstalarApp(paquete, d, this::registrarMensaje);
     }
 
+    /**
+     * Inicia la actividad principal de la aplicación seleccionada mediante la herramienta `monkey`.
+     */
     private void iniciarEjecucion() {
         String paquete = entradaPaquete.getText().trim();
         Dispositivo d = obtenerDispositivoValido();
@@ -618,6 +732,9 @@ public class GestorApp extends JFrame {
         adbService.ejecutarApp(paquete, d, this::registrarMensaje);
     }
 
+    /**
+     * Borra la memoria caché y datos de usuario de la aplicación objetivo.
+     */
     private void iniciarLimpiezaDatos() {
         String paquete = entradaPaquete.getText().trim();
         Dispositivo d = obtenerDispositivoValido();
@@ -630,6 +747,9 @@ public class GestorApp extends JFrame {
         adbService.limpiarDatosApp(paquete, d, this::registrarMensaje);
     }
 
+    /**
+     * Inicia la transmisión de pantalla en tiempo real utilizando la utilidad Scrcpy.
+     */
     private void iniciarScrcpy() {
         Dispositivo d = obtenerDispositivoValido();
 
@@ -638,6 +758,9 @@ public class GestorApp extends JFrame {
         adbService.iniciarScrcpyNativo(d, this::registrarMensaje);
     }
 
+    /**
+     * Captura la pantalla del dispositivo, la guarda en disco y la copia al portapapeles del sistema.
+     */
     private void iniciarCaptura() {
         Dispositivo d = obtenerDispositivoValido();
         if (d == null) return;
@@ -653,8 +776,14 @@ public class GestorApp extends JFrame {
                 try {
                     Image imagen = ImageIO.read(archivoDestino);
                     Toolkit.getDefaultToolkit().getSystemClipboard().setContents(new Transferable() {
-                        public DataFlavor[] getTransferDataFlavors() { return new DataFlavor[]{DataFlavor.imageFlavor}; }
-                        public boolean isDataFlavorSupported(DataFlavor flavor) { return DataFlavor.imageFlavor.equals(flavor); }
+                        public DataFlavor[] getTransferDataFlavors() {
+                            return new DataFlavor[]{DataFlavor.imageFlavor};
+                        }
+
+                        public boolean isDataFlavorSupported(DataFlavor flavor) {
+                            return DataFlavor.imageFlavor.equals(flavor);
+                        }
+
                         public Object getTransferData(DataFlavor flavor) throws UnsupportedFlavorException {
                             if (isDataFlavorSupported(flavor)) return imagen;
                             throw new UnsupportedFlavorException(flavor);
@@ -668,6 +797,9 @@ public class GestorApp extends JFrame {
         }
     }
 
+    /**
+     * Abre una ventana emergente en vivo para monitorear el flujo de logs (`logcat`) del dispositivo.
+     */
     private void abrirVentanaLogcat() {
         Dispositivo d = obtenerDispositivoValido();
         if (d == null) return;
@@ -741,7 +873,8 @@ public class GestorApp extends JFrame {
 
                     doc.insertString(doc.getLength(), linea + "\n", estiloUsar);
                     if (doc.getLength() > 60000) doc.remove(0, 20000);
-                } catch (Exception ignored) {}
+                } catch (Exception ignored) {
+                }
             });
         });
 
