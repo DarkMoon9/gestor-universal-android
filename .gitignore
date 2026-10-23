@@ -1,0 +1,24 @@
+# ==========================================
+# EXCLUSIONES DE GIT - GESTOR APP
+# ==========================================
+
+# Archivos de compilación de Maven
+target/
+*.class
+
+# Configuración del IDE (IntelliJ IDEA)
+.idea/
+*.iml
+*.iws
+*.ipr
+out/
+
+# Recursos descargados y generados en ejecución
+cache_iconos/
+scrcpy/
+*.zip
+scrcpy_temp.zip
+
+# Archivos del sistema
+.DS_Store
+Thumbs.db
