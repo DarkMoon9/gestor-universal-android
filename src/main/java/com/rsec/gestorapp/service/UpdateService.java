@@ -19,7 +19,7 @@ import javax.swing.border.EmptyBorder;
  * Servicio encargado de comprobar versiones en GitHub Releases
  * y gestionar la auto-actualización y reemplazo del archivo .jar.
  *
- * @author DarkMoon9
+ * @author Marco Vences
  * @version 1.1.0
  */
 public class UpdateService {
@@ -29,7 +29,7 @@ public class UpdateService {
     private static final String GITHUB_REPOSITORIO = "gestor-universal-android";
 
     // Versión grabada en el binario local
-    public static final String VERSION_ACTUAL = "1.0.0";
+    public static final String VERSION_ACTUAL = "1.1.0";
 
     /**
      * Consulta la API de GitHub en segundo plano.

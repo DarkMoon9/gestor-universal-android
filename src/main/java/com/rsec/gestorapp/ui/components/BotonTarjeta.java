@@ -20,8 +20,8 @@ import java.awt.event.MouseEvent;
  * Incluye un icono visual, título, subtítulo, una flecha indicadora de acción
  * y retroalimentación visual al pasar el cursor (efecto hover).
  *
- * @author RSEC
- * @version Marco Vences
+ * @author Marco Vences
+ * @version 1.1.0
  */
 public class BotonTarjeta extends JPanel {
 
