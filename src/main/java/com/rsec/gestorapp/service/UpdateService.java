@@ -16,23 +16,28 @@ import javax.swing.SwingUtilities;
 import javax.swing.border.EmptyBorder;
 
 /**
- * Servicio encargado de comprobar versiones en GitHub Releases
- * y gestionar la auto-actualización y reemplazo del archivo .jar.
+ * Servicio encargado de gestionar la comprobación de versiones en GitHub Releases
+ * y la actualización del archivo ejecutable hacia "Gestor Android.jar".
  *
- * @author Marco Vences
+ * @author DarkMoon9
  * @version 1.1.0
  */
 public class UpdateService {
 
-    // Configuración oficial de tu repositorio en GitHub
+    // Configuración del repositorio en GitHub
     private static final String GITHUB_USUARIO = "DarkMoon9";
     private static final String GITHUB_REPOSITORIO = "gestor-universal-android";
 
-    // Versión grabada en el binario local
+    // Nombre definitivo del archivo ejecutable que tendrá la aplicación
+    private static final String NOMBRE_JAR_DESTINO = "Gestor_Android.jar";
+
+    // =========================================================================
+    // IMPORTANTE: Esta versión debe coincidir con el tag publicado en GitHub
+    // =========================================================================
     public static final String VERSION_ACTUAL = "1.1.0";
 
     /**
-     * Consulta la API de GitHub en segundo plano.
+     * Consulta la API de GitHub en segundo plano para verificar si existe una nueva versión.
      */
     public static void comprobarActualizacionesManual() {
         new Thread(() -> {
@@ -44,8 +49,8 @@ public class UpdateService {
                 HttpURLConnection conexion = (HttpURLConnection) url.openConnection();
                 conexion.setRequestMethod("GET");
                 conexion.setRequestProperty("Accept", "application/vnd.github.v3+json");
-                conexion.setConnectTimeout(5000);
-                conexion.setReadTimeout(5000);
+                conexion.setConnectTimeout(6000);
+                conexion.setReadTimeout(6000);
 
                 int codigoRespuesta = conexion.getResponseCode();
 
@@ -62,13 +67,12 @@ public class UpdateService {
                     String json = respuesta.toString();
                     String ultimaVersion = extraerTagVersion(json);
                     String urlDescargaJar = extraerUrlDescargaJar(json);
-                    String nombreNuevoJar = extraerNombreArchivoRemoto(urlDescargaJar);
 
-                    SwingUtilities.invokeLater(() -> procesarResultado(ultimaVersion, urlDescargaJar, nombreNuevoJar));
+                    SwingUtilities.invokeLater(() -> procesarResultado(ultimaVersion, urlDescargaJar));
 
                 } else if (codigoRespuesta == 404) {
                     SwingUtilities.invokeLater(() -> JOptionPane.showMessageDialog(null,
-                            "No se encontraron publicaciones de versiones en el repositorio.",
+                            "No se encontraron versiones publicadas en el repositorio.",
                             "Verificación de Actualizaciones",
                             JOptionPane.INFORMATION_MESSAGE));
                 } else {
@@ -116,31 +120,20 @@ public class UpdateService {
         return null;
     }
 
-    private static String extraerNombreArchivoRemoto(String urlDescarga) {
-        if (urlDescarga == null || urlDescarga.isEmpty()) {
-            return "GestorUniversalAndroid.jar";
-        }
-        int ultimoSlash = urlDescarga.lastIndexOf('/');
-        if (ultimoSlash != -1 && ultimoSlash < urlDescarga.length() - 1) {
-            return urlDescarga.substring(ultimoSlash + 1);
-        }
-        return "GestorUniversalAndroid.jar";
-    }
-
-    private static void procesarResultado(String ultimaVersion, String urlDescargaJar, String nombreNuevoJar) {
+    private static void procesarResultado(String ultimaVersion, String urlDescargaJar) {
         if (!VERSION_ACTUAL.equals(ultimaVersion)) {
             int opcion = JOptionPane.showConfirmDialog(null,
                     "¡Hay una nueva versión disponible!\n\n" +
                             "Versión actual: " + VERSION_ACTUAL + "\n" +
                             "Nueva versión: " + ultimaVersion + "\n\n" +
-                            "¿Deseas descargar e instalar la actualización automáticamente ahora?",
+                            "¿Deseas descargar la actualización ahora?",
                     "Actualización Disponible",
                     JOptionPane.YES_NO_OPTION,
                     JOptionPane.QUESTION_MESSAGE);
 
             if (opcion == JOptionPane.YES_OPTION) {
                 if (urlDescargaJar != null && !urlDescargaJar.isEmpty()) {
-                    descargarYReemplazar(urlDescargaJar, nombreNuevoJar);
+                    descargarYReemplazar(urlDescargaJar);
                 } else {
                     JOptionPane.showMessageDialog(null,
                             "No se encontró un archivo .jar ejecutable adjunto en el release de GitHub.",
@@ -156,22 +149,25 @@ public class UpdateService {
         }
     }
 
-    private static void descargarYReemplazar(String urlDescarga, String nombreNuevoJar) {
+    private static void descargarYReemplazar(String urlDescarga) {
         try {
-            // Verificar si se está ejecutando desde un .jar empaquetado real
+            // Ubicación del archivo en ejecución
             File jarEnEjecucion = new File(UpdateService.class.getProtectionDomain()
                     .getCodeSource()
                     .getLocation()
                     .toURI());
 
+            // Si se ejecuta desde el IDE, mostrar aviso informativo
             if (!jarEnEjecucion.getName().toLowerCase().endsWith(".jar")) {
                 JOptionPane.showMessageDialog(null,
-                        "Estás ejecutando el proyecto desde el entorno de desarrollo (IntelliJ IDEA).\n" +
-                                "Para probar el auto-reemplazo del archivo, compila con Maven y ejecuta el .jar directamente.",
-                        "Aviso de Desarrollo",
+                        "Estás ejecutando desde IntelliJ IDEA.\nPara probar la sustitución física, ejecuta el archivo .jar empaquetado.",
+                        "Modo Desarrollo",
                         JOptionPane.INFORMATION_MESSAGE);
                 return;
             }
+
+            File carpetaDestino = jarEnEjecucion.getParentFile();
+            File archivoTemporal = new File(carpetaDestino, "actualizacion.tmp");
 
             JDialog dialogo = new JDialog();
             dialogo.setTitle("Descargando Actualización...");
@@ -180,7 +176,7 @@ public class UpdateService {
             dialogo.setLayout(new BorderLayout(10, 10));
             dialogo.setDefaultCloseOperation(JDialog.DO_NOTHING_ON_CLOSE);
 
-            JLabel lblEstado = new JLabel("Conectando con GitHub...");
+            JLabel lblEstado = new JLabel("Conectando con el servidor...");
             lblEstado.setBorder(new EmptyBorder(10, 15, 0, 15));
             JProgressBar barra = new JProgressBar(0, 100);
             barra.setStringPainted(true);
@@ -191,13 +187,11 @@ public class UpdateService {
 
             new Thread(() -> {
                 try {
-                    File carpetaDestino = jarEnEjecucion.getParentFile();
-                    File archivoTemporal = new File(carpetaDestino, "descarga_actualizacion.tmp");
-
                     URL url = new URL(urlDescarga);
                     HttpURLConnection conexion = (HttpURLConnection) url.openConnection();
                     conexion.setRequestProperty("User-Agent", "Mozilla/5.0");
 
+                    // Manejo de redirecciones de GitHub (Amazon S3)
                     int estado = conexion.getResponseCode();
                     if (estado == HttpURLConnection.HTTP_MOVED_TEMP || estado == HttpURLConnection.HTTP_MOVED_PERM
                             || estado == 307 || estado == 308) {
@@ -210,7 +204,7 @@ public class UpdateService {
                     try (InputStream entrada = conexion.getInputStream();
                          FileOutputStream salida = new FileOutputStream(archivoTemporal)) {
 
-                        byte[] bufer = new byte[4096];
+                        byte[] bufer = new byte[8192];
                         int leidos;
                         long acum = 0;
 
@@ -231,18 +225,18 @@ public class UpdateService {
                     SwingUtilities.invokeLater(() -> {
                         dialogo.dispose();
                         JOptionPane.showMessageDialog(null,
-                                "Descarga completada.\nLa aplicación se reiniciará para aplicar los cambios.",
+                                "Descarga finalizada.\nLa aplicación se cerrará para guardar el nuevo archivo '" + NOMBRE_JAR_DESTINO + "'.",
                                 "Actualización Lista",
                                 JOptionPane.INFORMATION_MESSAGE);
 
-                        ejecutarScriptActualizacion(archivoTemporal, nombreNuevoJar, jarEnEjecucion);
+                        ejecutarSustitucionManual(archivoTemporal, jarEnEjecucion);
                     });
 
                 } catch (Exception ex) {
                     SwingUtilities.invokeLater(() -> {
                         dialogo.dispose();
                         JOptionPane.showMessageDialog(null,
-                                "Error durante la descarga:\n" + ex.getMessage(),
+                                "Error al descargar el archivo:\n" + ex.getMessage(),
                                 "Error de Descarga",
                                 JOptionPane.ERROR_MESSAGE);
                     });
@@ -252,35 +246,38 @@ public class UpdateService {
             dialogo.setVisible(true);
 
         } catch (Exception e) {
-            JOptionPane.showMessageDialog(null, "Error al determinar la ruta del ejecutable: " + e.getMessage());
+            JOptionPane.showMessageDialog(null, "Error con la ruta del ejecutable: " + e.getMessage());
         }
     }
 
-    private static void ejecutarScriptActualizacion(File archivoTemporal, String nombreNuevoJar, File jarEnEjecucion) {
+    /**
+     * Crea un script que reemplaza el archivo por "Gestor Android.jar",
+     * muestra un aviso de confirmación y finaliza sin relanzar la app.
+     */
+    private static void ejecutarSustitucionManual(File archivoTemporal, File jarEnEjecucion) {
         try {
             File carpetaDestino = jarEnEjecucion.getParentFile();
-            File scriptBat = new File(carpetaDestino, "actualizar.bat");
+            File scriptBat = new File(carpetaDestino, "reemplazar.bat");
             File scriptVbs = new File(carpetaDestino, "ocultar.vbs");
-            File nuevoJarFinal = new File(carpetaDestino, nombreNuevoJar);
+            File archivoFinal = new File(carpetaDestino, NOMBRE_JAR_DESTINO);
 
             StringBuilder script = new StringBuilder();
             script.append("@echo off\r\n");
-            // Espera 3 segundos a que Java libere completamente el archivo .jar
-            script.append("timeout /t 3 /nobreak > nul\r\n");
+            // Espera 2 segundos para asegurar que Java liberó el archivo en Windows
+            script.append("timeout /t 2 /nobreak > nul\r\n");
 
-            // Si el nombre cambió respecto al que se estaba ejecutando, elimina el viejo
-            if (!jarEnEjecucion.getAbsolutePath().equalsIgnoreCase(nuevoJarFinal.getAbsolutePath())) {
+            // Si el .jar que se estaba usando tenía otro nombre, se elimina
+            if (!jarEnEjecucion.getAbsolutePath().equalsIgnoreCase(archivoFinal.getAbsolutePath())) {
                 script.append("if exist \"").append(jarEnEjecucion.getAbsolutePath()).append("\" del /f /q \"").append(jarEnEjecucion.getAbsolutePath()).append("\"\r\n");
             }
 
-            // Mueve el archivo temporal reemplazando el .jar final
-            script.append("move /y \"").append(archivoTemporal.getAbsolutePath()).append("\" \"").append(nuevoJarFinal.getAbsolutePath()).append("\"\r\n");
+            // Mueve el archivo temporal al nombre definitivo con comillas para soportar espacios
+            script.append("move /y \"").append(archivoTemporal.getAbsolutePath()).append("\" \"").append(archivoFinal.getAbsolutePath()).append("\"\r\n");
 
-            // Cambia de directorio e inicia el nuevo .jar
-            script.append("cd /d \"").append(carpetaDestino.getAbsolutePath()).append("\"\r\n");
-            script.append("start \"\" java -jar \"").append(nuevoJarFinal.getName()).append("\"\r\n");
+            // Mensaje nativo emergente de Windows informando que ya puede abrirlo
+            script.append("msg * \"Actualizacion completada con exito. Ya puedes abrir ").append(NOMBRE_JAR_DESTINO).append("\"\r\n");
 
-            // Elimina los archivos temporales de script
+            // Elimina los scripts temporales
             script.append("del \"").append(scriptVbs.getAbsolutePath()).append("\"\r\n");
             script.append("del \"%~f0\"\r\n");
 
@@ -288,7 +285,7 @@ public class UpdateService {
                 fosBat.write(script.toString().getBytes());
             }
 
-            // Script en VBScript para ejecutar en modo oculto sin ventanas de CMD
+            // VBScript para ejecutar el .bat en segundo plano sin consola negra
             String contenidoVbs = "Set WshShell = CreateObject(\"WScript.Shell\")\r\n" +
                     "WshShell.Run \"cmd /c \"\"" + scriptBat.getAbsolutePath() + "\"\"\", 0, False\r\n";
 
@@ -296,12 +293,15 @@ public class UpdateService {
                 fosVbs.write(contenidoVbs.getBytes());
             }
 
+            // Ejecuta el VBScript de forma silenciosa
             Runtime.getRuntime().exec("wscript.exe \"" + scriptVbs.getAbsolutePath() + "\"");
+
+            // Cierra la aplicación actual
             System.exit(0);
 
         } catch (Exception e) {
             JOptionPane.showMessageDialog(null,
-                    "No se pudo ejecutar el script de actualización:\n" + e.getMessage(),
+                    "Error al crear el script de actualización:\n" + e.getMessage(),
                     "Error de Actualización",
                     JOptionPane.ERROR_MESSAGE);
         }
